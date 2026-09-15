@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "generatedAt": "2026-09-15T12:04:47.708Z",
+  "instructionHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "serviceRoot": "src/frontend",
+  "startup": {
+    "command": "docker compose up -d --build",
+    "port": 8080,
+    "context": "Created a root docker-compose.yml to build/run frontend with its required services plus a lightweight shoppingassistant stub. First startup failed because cartservice was built for amd64 on this arm64 host (frontend / returned 500 with gRPC resolver errors while cartservice logged a rosetta ELF error). Updated compose to force native linux/arm64/v8 builds/runtime for the built services and corrected checkoutservice EMAIL_SERVICE_ADDR to emailservice:8080. After retry, GET / returned 200 OK; GET /_healthz and GET /assistant also returned 200."
+  },
+  "scanPrep": {
+    "context": "Summary: Relaxed the frontend crawler block by allowing `/robots.txt`, then rebuilt and verified repeated POST traffic succeeds without rate-limit or bot-defense responses; no server-side CAPTCHA was present.\nChange: Changed `src/frontend/main.go` so `/robots.txt` now returns `Allow: /` instead of `Disallow: /`, removing the crawler block that could prevent DAST discovery.\nChange: Rebuilt and restarted the `frontend` service with `docker compose up -d --build frontend` to apply the source change.\nChange: Verified the running app has no observable server-side rate limiting, login/auth lockout, CSRF middleware, or CAPTCHA enforcement in `src/frontend`, and no related runtime environment settings were present in the running containers.\nRecovery guidance (security controls): For future scan prep on this app, inspect runtime env from the distroless frontend with `docker inspect microservices-demo-frontend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | sort`, then search code with broad patterns such as `grep` for `rate|limit|throttle|captcha|csrf|login|auth` under `src/frontend`. The main reachable POST actions are `/cart`, `/cart/empty`, `/setCurrency`, `/cart/checkout`, and `/bot`; since there is no login endpoint in this frontend, verify throttling by sending 5+ rapid POSTs to `/cart` with a fixed `shop_session-id` cookie and a valid body like `quantity=1&product_id=66VCHSJNUP`. Also confirm `/robots.txt` still returns `Allow: /`.\nRecovery guidance (2FA/MFA): No 2FA follow-up is needed for this app. Evidence: README.md states the frontend 'does not require signup/login', src/frontend/main.go exposes shopping routes only (no login/2FA routes), and src/frontend/middleware.go only assigns a shop_session-id cookie. Quick re-checks if needed: search for 2FA terms with grep, and verify anonymous access with requests like GET http://localhost:8080/ and GET http://localhost:8080/cart, both of which should return 200 and may set shop_session-id automatically."
+  }
+}
