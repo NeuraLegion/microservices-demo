@@ -36,7 +36,7 @@ type Payload interface {
 
 type AddToCartPayload struct {
 	Quantity  uint64 `validate:"required,gte=1,lte=10"`
-	ProductID string `validate:"required"`
+	ProductID string `validate:"required,alphanum,len=10"`
 }
 
 type PlaceOrderPayload struct {

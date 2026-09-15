@@ -535,7 +535,10 @@ func (fe *frontendServer) chooseAd(ctx context.Context, ctxKeys []string, log lo
 
 func renderHTTPError(log logrus.FieldLogger, r *http.Request, w http.ResponseWriter, err error, code int) {
 	log.WithField("error", err).Error("request error")
-	errMsg := fmt.Sprintf("%+v", err)
+	errMsg := http.StatusText(code)
+	if code < http.StatusInternalServerError {
+		errMsg = err.Error()
+	}
 
 	w.WriteHeader(code)
 
