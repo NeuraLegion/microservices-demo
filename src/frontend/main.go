@@ -43,6 +43,7 @@ const (
 	cookiePrefix    = "shop_"
 	cookieSessionID = cookiePrefix + "session-id"
 	cookieCurrency  = cookiePrefix + "currency"
+	cookieCSRFToken = cookiePrefix + "csrf-token"
 )
 
 var (
@@ -59,6 +60,7 @@ var (
 )
 
 type ctxKeySessionID struct{}
+type ctxKeyCSRFToken struct{}
 
 type frontendServer struct {
 	productCatalogSvcAddr string
@@ -166,6 +168,7 @@ func main() {
 	handler = recoverPanics(handler)                  // recover panics with a generic 500 page
 	handler = &logHandler{log: log, next: handler}     // add logging
 	handler = ensureSessionID(handler)                 // add session ID
+	handler = ensureCSRFToken(handler)                 // add CSRF token cookie/context
 	handler = otelhttp.NewHandler(handler, "frontend") // add OTel tracing
 
 	log.Infof("starting server on %s:%s", addr, srvPort)

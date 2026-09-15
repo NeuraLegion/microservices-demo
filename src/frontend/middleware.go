@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,9 +119,12 @@ func ensureSessionID(next http.Handler) http.HandlerFunc {
 				sessionID = u.String()
 			}
 			http.SetCookie(w, &http.Cookie{
-				Name:   cookieSessionID,
-				Value:  sessionID,
-				MaxAge: cookieMaxAge,
+				Name:     cookieSessionID,
+				Value:    sessionID,
+				MaxAge:   cookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   isSecureRequest(r),
 			})
 		} else if err != nil {
 			return
@@ -131,4 +135,39 @@ func ensureSessionID(next http.Handler) http.HandlerFunc {
 		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	}
+}
+
+func ensureCSRFToken(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var token string
+		c, err := r.Cookie(cookieCSRFToken)
+		if err == http.ErrNoCookie || c == nil || c.Value == "" {
+			u, _ := uuid.NewRandom()
+			token = u.String()
+			http.SetCookie(w, &http.Cookie{
+				Name:     cookieCSRFToken,
+				Value:    token,
+				MaxAge:   cookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   isSecureRequest(r),
+			})
+		} else if err != nil {
+			return
+		} else {
+			token = c.Value
+		}
+
+		ctx := context.WithValue(r.Context(), ctxKeyCSRFToken{}, token)
+		r = r.WithContext(ctx)
+		next.ServeHTTP(w, r)
+	}
+}
+
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }

@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -566,6 +567,11 @@ func (fe *frontendServer) chatBotHandler(w http.ResponseWriter, r *http.Request)
 
 func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
+	if !validCSRFToken(r) {
+		renderHTTPError(log, r, w, errors.New("invalid CSRF token"), http.StatusForbidden)
+		return
+	}
+
 	cur := r.FormValue("currency_code")
 	payload := validator.SetCurrencyPayload{Currency: cur}
 	if err := payload.Validate(); err != nil {
@@ -577,9 +583,12 @@ func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Requ
 
 	if payload.Currency != "" {
 		http.SetCookie(w, &http.Cookie{
-			Name:   cookieCurrency,
-			Value:  payload.Currency,
-			MaxAge: cookieMaxAge,
+			Name:     cookieCurrency,
+			Value:    payload.Currency,
+			MaxAge:   cookieMaxAge,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   isSecureRequest(r),
 		})
 	}
 	referer := r.Header.Get("referer")
@@ -623,6 +632,7 @@ func injectCommonTemplateData(r *http.Request, payload map[string]interface{}) m
 	data := map[string]interface{}{
 		"session_id":        sessionID(r),
 		"request_id":        r.Context().Value(ctxKeyRequestID{}),
+		"csrf_token":        csrfToken(r),
 		"user_currency":     currentCurrency(r),
 		"platform_css":      plat.css,
 		"platform_name":     plat.provider,
@@ -655,6 +665,34 @@ func sessionID(r *http.Request) string {
 		return v.(string)
 	}
 	return ""
+}
+
+func csrfToken(r *http.Request) string {
+	v := r.Context().Value(ctxKeyCSRFToken{})
+	if v != nil {
+		return v.(string)
+	}
+
+	c, _ := r.Cookie(cookieCSRFToken)
+	if c != nil {
+		return c.Value
+	}
+
+	return ""
+}
+
+func validCSRFToken(r *http.Request) bool {
+	expectedToken := csrfToken(r)
+	providedToken := r.PostFormValue("csrf_token")
+	if providedToken == "" {
+		providedToken = r.Header.Get("X-CSRF-Token")
+	}
+
+	if expectedToken == "" || providedToken == "" {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(expectedToken), []byte(providedToken)) == 1
 }
 
 func cartIDs(c []*pb.CartItem) []string {
