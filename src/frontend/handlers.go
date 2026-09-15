@@ -16,6 +16,10 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	crand "crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -42,10 +46,16 @@ type platformDetails struct {
 	provider string
 }
 
+const (
+	csrfFieldName        = "csrf_token"
+	setCurrencyCSRFScope = "setCurrency"
+)
+
 var (
 	frontendMessage  = strings.TrimSpace(os.Getenv("FRONTEND_MESSAGE"))
 	isCymbalBrand    = "true" == strings.ToLower(os.Getenv("CYMBAL_BRANDING"))
 	assistantEnabled = "true" == strings.ToLower(os.Getenv("ENABLE_ASSISTANT"))
+	csrfSecret       = mustGenerateCSRFSecret()
 	templates        = template.Must(template.New("").
 				Funcs(template.FuncMap{
 			"renderMoney":        renderMoney,
@@ -498,6 +508,10 @@ func (fe *frontendServer) chatBotHandler(w http.ResponseWriter, r *http.Request)
 
 func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
+	if !validCSRFToken(r, setCurrencyCSRFScope) {
+		renderHTTPError(log, r, w, errors.New("invalid CSRF token"), http.StatusForbidden)
+		return
+	}
 	cur := r.FormValue("currency_code")
 	payload := validator.SetCurrencyPayload{Currency: cur}
 	if err := payload.Validate(); err != nil {
@@ -509,9 +523,11 @@ func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Requ
 
 	if payload.Currency != "" {
 		http.SetCookie(w, &http.Cookie{
-			Name:   cookieCurrency,
-			Value:  payload.Currency,
-			MaxAge: cookieMaxAge,
+			Name:     cookieCurrency,
+			Value:    payload.Currency,
+			MaxAge:   cookieMaxAge,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
 		})
 	}
 	referer := r.Header.Get("referer")
@@ -553,17 +569,18 @@ func renderHTTPError(log logrus.FieldLogger, r *http.Request, w http.ResponseWri
 
 func injectCommonTemplateData(r *http.Request, payload map[string]interface{}) map[string]interface{} {
 	data := map[string]interface{}{
-		"session_id":        sessionID(r),
-		"request_id":        r.Context().Value(ctxKeyRequestID{}),
-		"user_currency":     currentCurrency(r),
-		"platform_css":      plat.css,
-		"platform_name":     plat.provider,
-		"is_cymbal_brand":   isCymbalBrand,
-		"assistant_enabled": assistantEnabled,
-		"deploymentDetails": deploymentDetailsMap,
-		"frontendMessage":   frontendMessage,
-		"currentYear":       time.Now().Year(),
-		"baseUrl":           baseUrl,
+		"session_id":              sessionID(r),
+		"request_id":              r.Context().Value(ctxKeyRequestID{}),
+		"user_currency":           currentCurrency(r),
+		"set_currency_csrf_token": csrfToken(sessionID(r), csrfCookieToken(r), setCurrencyCSRFScope),
+		"platform_css":           plat.css,
+		"platform_name":          plat.provider,
+		"is_cymbal_brand":        isCymbalBrand,
+		"assistant_enabled":      assistantEnabled,
+		"deploymentDetails":      deploymentDetailsMap,
+		"frontendMessage":        frontendMessage,
+		"currentYear":            time.Now().Year(),
+		"baseUrl":                baseUrl,
 	}
 
 	for k, v := range payload {
@@ -595,6 +612,60 @@ func cartIDs(c []*pb.CartItem) []string {
 		out[i] = v.GetProductId()
 	}
 	return out
+}
+
+func csrfToken(sessionID, browserToken, scope string) string {
+	if sessionID == "" || browserToken == "" {
+		return ""
+	}
+
+	mac := hmac.New(sha256.New, csrfSecret)
+	mac.Write([]byte(scope))
+	mac.Write([]byte{0})
+	mac.Write([]byte(sessionID))
+	mac.Write([]byte{0})
+	mac.Write([]byte(browserToken))
+
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func csrfCookieToken(r *http.Request) string {
+	v := r.Context().Value(ctxKeyCSRFToken{})
+	if v != nil {
+		if token, ok := v.(string); ok {
+			return token
+		}
+	}
+
+	c, _ := r.Cookie(cookieCSRFToken)
+	if c != nil {
+		return c.Value
+	}
+
+	return ""
+}
+
+func validCSRFToken(r *http.Request, scope string) bool {
+	token := strings.TrimSpace(r.FormValue(csrfFieldName))
+	if token == "" {
+		return false
+	}
+
+	expected := csrfToken(sessionID(r), csrfCookieToken(r), scope)
+	if expected == "" {
+		return false
+	}
+
+	return hmac.Equal([]byte(token), []byte(expected))
+}
+
+func mustGenerateCSRFSecret() []byte {
+	secret := make([]byte, 32)
+	if _, err := crand.Read(secret); err != nil {
+		panic(fmt.Sprintf("failed to generate CSRF secret: %v", err))
+	}
+
+	return secret
 }
 
 // get total # of items in cart

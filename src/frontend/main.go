@@ -42,6 +42,7 @@ const (
 
 	cookiePrefix    = "shop_"
 	cookieSessionID = cookiePrefix + "session-id"
+	cookieCSRFToken = cookiePrefix + "csrf"
 	cookieCurrency  = cookiePrefix + "currency"
 )
 
@@ -165,6 +166,7 @@ func main() {
 	var handler http.Handler = r
 	handler = &logHandler{log: log, next: handler}     // add logging
 	handler = ensureSessionID(handler)                 // add session ID
+	handler = ensureCSRFCookie(handler)                // add CSRF token cookie
 	handler = otelhttp.NewHandler(handler, "frontend") // add OTel tracing
 
 	log.Infof("starting server on %s:%s", addr, srvPort)
