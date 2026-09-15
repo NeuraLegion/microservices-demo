@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -465,31 +466,67 @@ func (fe *frontendServer) chatBotHandler(w http.ResponseWriter, r *http.Request)
 	type Response struct {
 		Message string `json:"message"`
 	}
+	type Request struct {
+		Message string `json:"message"`
+		Image   string `json:"image"`
+	}
 
 	type LLMResponse struct {
 		Content string         `json:"content"`
 		Details map[string]any `json:"details"`
 	}
 
+	respondWithError := func(code int, err error, message string) {
+		if err != nil {
+			log.WithField("error", err).Error("shopping assistant request error")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		if encodeErr := json.NewEncoder(w).Encode(Response{Message: message}); encodeErr != nil {
+			log.WithField("error", encodeErr).Error("failed to write shopping assistant error response")
+		}
+	}
+
+	var requestBody Request
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		respondWithError(http.StatusBadRequest, errors.Wrap(err, "failed to decode request body"), "Invalid request payload.")
+		return
+	}
+	if strings.TrimSpace(requestBody.Message) == "" || strings.TrimSpace(requestBody.Image) == "" {
+		respondWithError(http.StatusBadRequest, errors.New("missing message or image"), "Invalid request payload.")
+		return
+	}
+
+	requestJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		respondWithError(http.StatusInternalServerError, errors.Wrap(err, "failed to encode request body"), "Sorry, I can't process that request right now.")
+		return
+	}
+
 	var response LLMResponse
 
 	url := "http://" + fe.shoppingAssistantSvcAddr
-	req, err := http.NewRequest(http.MethodPost, url, r.Body)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, url, bytes.NewReader(requestJSON))
 	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to create request"), http.StatusInternalServerError)
+		respondWithError(http.StatusInternalServerError, errors.Wrap(err, "failed to create request"), "Sorry, I can't process that request right now.")
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to send request"), http.StatusInternalServerError)
+		respondWithError(http.StatusBadGateway, errors.Wrap(err, "failed to send request"), "Sorry, I can't process that request right now.")
+		return
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		respondWithError(http.StatusBadGateway, errors.Errorf("shopping assistant returned status %d", res.StatusCode), "Sorry, I can't process that request right now.")
 		return
 	}
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to read response"), http.StatusInternalServerError)
+		respondWithError(http.StatusBadGateway, errors.Wrap(err, "failed to read response"), "Sorry, I can't process that request right now.")
 		return
 	}
 
@@ -498,14 +535,16 @@ func (fe *frontendServer) chatBotHandler(w http.ResponseWriter, r *http.Request)
 
 	err = json.Unmarshal(body, &response)
 	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to unmarshal body"), http.StatusInternalServerError)
+		respondWithError(http.StatusBadGateway, errors.Wrap(err, "failed to unmarshal body"), "Sorry, I can't process that request right now.")
 		return
 	}
 
 	// respond with the same message
-	json.NewEncoder(w).Encode(Response{Message: response.Content})
-
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(Response{Message: response.Content}); err != nil {
+		log.WithField("error", err).Error("failed to write shopping assistant response")
+	}
 }
 
 func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Request) {
