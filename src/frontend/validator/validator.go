@@ -48,7 +48,7 @@ type PlaceOrderPayload struct {
 	Country       string `validate:"required,max=128"`
 	CcNumber      string `validate:"required,credit_card"`
 	CcMonth       int64  `validate:"required,gte=1,lte=12"`
-	CcYear        int64  `validate:"required"`
+	CcYear        int64  `validate:"required,gte=1"`
 	CcCVV         int64  `validate:"required"`
 }
 
