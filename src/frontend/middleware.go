@@ -16,9 +16,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"time"
 	"os"
+	"runtime/debug"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -80,6 +82,27 @@ func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, ctxKeyLog{}, log)
 	r = r.WithContext(ctx)
 	lh.next.ServeHTTP(rr, r)
+}
+
+func recoverPanics(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log, ok := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
+				if !ok {
+					fallbackLog := logrus.New()
+					log = fallbackLog
+				}
+				log.WithFields(logrus.Fields{
+					"panic": recovered,
+					"stack": string(debug.Stack()),
+				}).Error("recovered panic while processing request")
+				renderHTTPError(log, r, w, errors.New("unexpected server error"), http.StatusInternalServerError)
+			}
+		}()
+
+		next.ServeHTTP(w, r)
+	}
 }
 
 func ensureSessionID(next http.Handler) http.HandlerFunc {

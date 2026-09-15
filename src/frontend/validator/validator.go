@@ -17,6 +17,7 @@ package validator
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -28,6 +29,7 @@ var validate *validator.Validate
 // benefit of caching struct info and validations.
 func init() {
 	validate = validator.New(validator.WithRequiredStructEnabled())
+	validate.RegisterStructValidation(validatePlaceOrderPayload, PlaceOrderPayload{}, &PlaceOrderPayload{})
 }
 
 type Payload interface {
@@ -48,8 +50,33 @@ type PlaceOrderPayload struct {
 	Country       string `validate:"required,max=128"`
 	CcNumber      string `validate:"required,credit_card"`
 	CcMonth       int64  `validate:"required,gte=1,lte=12"`
-	CcYear        int64  `validate:"required"`
+	CcYear        int64  `validate:"required,gte=1"`
 	CcCVV         int64  `validate:"required"`
+}
+
+func validatePlaceOrderPayload(sl validator.StructLevel) {
+	var payload PlaceOrderPayload
+	switch po := sl.Current().Interface().(type) {
+	case PlaceOrderPayload:
+		payload = po
+	case *PlaceOrderPayload:
+		if po == nil {
+			return
+		}
+		payload = *po
+	default:
+		return
+	}
+
+	now := time.Now()
+	currentYear := int64(now.Year())
+	currentMonth := int64(now.Month())
+	if payload.CcYear < 1 || payload.CcMonth < 1 || payload.CcMonth > 12 {
+		return
+	}
+	if payload.CcYear < currentYear || (payload.CcYear == currentYear && payload.CcMonth < currentMonth) {
+		sl.ReportError(payload.CcYear, "CcYear", "CcYear", "notexpired", "")
+	}
 }
 
 type SetCurrencyPayload struct {
