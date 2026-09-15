@@ -26,6 +26,7 @@ import (
 
 type ctxKeyLog struct{}
 type ctxKeyRequestID struct{}
+type ctxKeyCSRFToken struct{}
 
 type logHandler struct {
 	log  *logrus.Logger
@@ -95,9 +96,11 @@ func ensureSessionID(next http.Handler) http.HandlerFunc {
 				sessionID = u.String()
 			}
 			http.SetCookie(w, &http.Cookie{
-				Name:   cookieSessionID,
-				Value:  sessionID,
-				MaxAge: cookieMaxAge,
+				Name:     cookieSessionID,
+				Value:    sessionID,
+				MaxAge:   cookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
 			})
 		} else if err != nil {
 			return
@@ -105,6 +108,32 @@ func ensureSessionID(next http.Handler) http.HandlerFunc {
 			sessionID = c.Value
 		}
 		ctx := context.WithValue(r.Context(), ctxKeySessionID{}, sessionID)
+		r = r.WithContext(ctx)
+		next.ServeHTTP(w, r)
+	}
+}
+
+func ensureCSRFCookie(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var csrfToken string
+		c, err := r.Cookie(cookieCSRFToken)
+		if err == http.ErrNoCookie {
+			u, _ := uuid.NewRandom()
+			csrfToken = u.String()
+			http.SetCookie(w, &http.Cookie{
+				Name:     cookieCSRFToken,
+				Value:    csrfToken,
+				MaxAge:   cookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+		} else if err != nil {
+			return
+		} else {
+			csrfToken = c.Value
+		}
+
+		ctx := context.WithValue(r.Context(), ctxKeyCSRFToken{}, csrfToken)
 		r = r.WithContext(ctx)
 		next.ServeHTTP(w, r)
 	}

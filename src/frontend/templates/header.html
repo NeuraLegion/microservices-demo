@@ -69,11 +69,12 @@
                     {{ if $.show_currency }}
                     <div class="h-controls">
                         <div class="h-control">
-                            <span class="icon currency-icon"> {{ renderCurrencyLogo $.user_currency}}</span>
-                            <form method="POST" class="controls-form" action="{{ $.baseUrl }}/setCurrency" id="currency_form" >
-                                <select name="currency_code" onchange="document.getElementById('currency_form').submit();">
-                                        {{range $.currencies}}
-                                    <option value="{{.}}" {{if eq . $.user_currency}}selected="selected"{{end}}>{{.}}</option>
+	                            <span class="icon currency-icon"> {{ renderCurrencyLogo $.user_currency}}</span>
+	                            <form method="POST" class="controls-form" action="{{ $.baseUrl }}/setCurrency" id="currency_form" >
+	                                <input type="hidden" name="csrf_token" value="{{ $.set_currency_csrf_token }}">
+	                                <select name="currency_code" onchange="document.getElementById('currency_form').submit();">
+	                                        {{range $.currencies}}
+	                                    <option value="{{.}}" {{if eq . $.user_currency}}selected="selected"{{end}}>{{.}}</option>
                                     {{end}}
                                 </select>
                             </form>

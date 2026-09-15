@@ -17,17 +17,24 @@ package validator
 import (
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/go-playground/validator/v10"
 )
 
 var validate *validator.Validate
+var productIDPattern = regexp.MustCompile(`^[A-Z0-9]{10}$`)
 
 // init() is a special function that will run when this package is imported.
 // It instantiates a SINGLE instance of *validator.Validate with the added
 // benefit of caching struct info and validations.
 func init() {
 	validate = validator.New(validator.WithRequiredStructEnabled())
+	if err := validate.RegisterValidation("productid", func(fl validator.FieldLevel) bool {
+		return productIDPattern.MatchString(fl.Field().String())
+	}); err != nil {
+		panic(fmt.Sprintf("failed to register productid validator: %v", err))
+	}
 }
 
 type Payload interface {
@@ -36,7 +43,7 @@ type Payload interface {
 
 type AddToCartPayload struct {
 	Quantity  uint64 `validate:"required,gte=1,lte=10"`
-	ProductID string `validate:"required"`
+	ProductID string `validate:"required,productid"`
 }
 
 type PlaceOrderPayload struct {
@@ -48,7 +55,7 @@ type PlaceOrderPayload struct {
 	Country       string `validate:"required,max=128"`
 	CcNumber      string `validate:"required,credit_card"`
 	CcMonth       int64  `validate:"required,gte=1,lte=12"`
-	CcYear        int64  `validate:"required"`
+	CcYear        int64  `validate:"required,gte=1"`
 	CcCVV         int64  `validate:"required"`
 }
 
